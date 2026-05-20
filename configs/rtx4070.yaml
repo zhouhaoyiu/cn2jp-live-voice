@@ -1,0 +1,75 @@
+# ============================================
+# i5-13600KF + RTX 4070 (12GB VRAM) 部署配置
+# Windows + CUDA, 显存充足
+# ============================================
+
+auto_detect_device: false
+
+# 音频采集 - Windows 麦克风
+capture:
+  sample_rate: 16000
+  channels: 1
+  chunk_size: 1024
+  device_index: null
+  target_sample_rate: 16000
+
+# ASR - 4070 12GB 显存充足，可用 small 模型 + float16
+asr:
+  model_size: "small"      # 12GB 可以用 small，识别更准
+  device: "cuda"
+  compute_type: "float16"  # CUDA 用 float16 更快
+  language: "zh"
+  vad_filter: true
+  vad_parameters:
+    min_silence_duration_ms: 600
+    speech_pad_ms: 300
+    threshold: 0.5
+  beam_size: 5
+  chunk_duration_sec: 3.0
+
+# 翻译 - HY-MT1.5-1.8B (FP16 约 4GB VRAM，4070 12GB 绰绰有余)
+translator:
+  model_name: "tencent/HY-MT1.5-1.8B"
+  device: "cuda"
+  src_lang: "zh"
+  tgt_lang: "ja"
+  # hf_endpoint: "https://hf-mirror.com"  # 国内无梯子时取消注释
+  # HY-MT 专用参数
+  max_new_tokens: 512
+  temperature: 0.7
+  top_k: 20
+  top_p: 0.6
+  repetition_penalty: 1.05
+
+# TTS - GPT-SoVITS 需要单独启动 API Server
+tts:
+  api_url: "http://127.0.0.1:9880"
+  refer_wav_path: "reference_audio/my_voice.wav"
+  prompt_text: "大家好，欢迎来到我的直播间，今天我们来聊一聊有趣的话题"    # ⚠️ 重要！请改成你录音时说的内容
+  prompt_language: "zh"
+  output_language: "ja"
+  speed: 1.1               # 稍快一点减少延迟
+  top_k: 15                # 降低采样空间，音色更稳定
+  top_p: 1
+  temperature: 0.8
+  seed: 42                 # 🔑 固定随机种子！同样文本=同样声音
+  repetition_penalty: 1.6
+  text_split_method: "cut5"
+  min_text_length: 3
+  timeout: 30              # CUDA 模式很快
+  retry_count: 2
+
+# 音频输出 - 推荐用 VB-Audio Virtual Cable 接入 OBS
+player:
+  sample_rate: 32000
+  channels: 1
+  device_index: null       # 设为 VB-Audio Cable 的设备索引
+  buffer_size: 10.0
+  volume: 1.0
+
+pipeline:
+  max_queue_size: 32
+
+logging:
+  level: "INFO"
+  log_file: "logs/pipeline.log"

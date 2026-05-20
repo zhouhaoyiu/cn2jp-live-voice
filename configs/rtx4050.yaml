@@ -1,0 +1,82 @@
+# ============================================
+# RTX 4050 Laptop (6GB VRAM) 部署配置
+# Windows + CUDA, 优化显存占用
+# ============================================
+
+auto_detect_device: false
+
+# 音频采集 - Windows 麦克风
+capture:
+  sample_rate: 16000
+  channels: 1
+  chunk_size: 1024
+  device_index: null
+  target_sample_rate: 16000
+
+# ASR - 4050 显存紧张，用 base 模型 + int8
+asr:
+  model_size: "base"       # 4050 显存有限，用 base (~1GB)
+  device: "cuda"
+  compute_type: "int8"     # int8 最省显存
+  language: "zh"
+  vad_filter: true
+  vad_parameters:
+    min_silence_duration_ms: 700   # 稍长一点，减少碎片句
+    speech_pad_ms: 300
+    threshold: 0.5
+  beam_size: 3
+  chunk_duration_sec: 3.0
+
+# 翻译 - HY-MT1.5-1.8B (1.8B 模型约需 4GB VRAM FP16)
+# RTX 4050 6GB: FP16 刚好够用，建议关闭其他 GPU 程序
+# 备选: facebook/nllb-200-distilled-600M (约需 1.5GB，更省显存)
+# 量化版: tencent/HY-MT1.5-1.8B-GPTQ-Int4 (仅约 1GB 显存)
+translator:
+  model_name: "tencent/HY-MT1.5-1.8B"
+  device: "cuda"
+  src_lang: "zh"
+  tgt_lang: "ja"
+  # hf_endpoint: "https://hf-mirror.com"  # 国内无梯子时取消注释
+  # HY-MT 专用参数
+  max_new_tokens: 512
+  temperature: 0.7
+  top_k: 20
+  top_p: 0.6
+  repetition_penalty: 1.05
+  # NLLB 专用参数（仅 model_name 为 nllb 时生效）
+  # max_length: 128
+  # beam_size: 3
+  # no_repeat_ngram_size: 2
+
+# TTS - GPT-SoVITS 需要单独启动 API Server
+tts:
+  api_url: "http://127.0.0.1:9880"
+  refer_wav_path: "reference_audio/my_voice.wav"
+  prompt_text: "大家好，欢迎来到我的直播间，今天我们来聊一聊有趣的话题"    # ⚠️ 重要！请改成你录音时说的内容
+  prompt_language: "zh"
+  output_language: "ja"
+  speed: 1.1               # 稍快一点减少延迟
+  top_k: 5                # 降低采样空间，音色更稳定
+  top_p: 0.8              # 核采样阈值
+  temperature: 0.5        # 低温度 = 音色更一致
+  seed: 42                # 🔑 固定随机种子！同样文本=同样声音
+  repetition_penalty: 1.4  # 防止重复
+  text_split_method: "cut5"
+  min_text_length: 3      # 最短文本长度
+  timeout: 30              # CUDA 模式比 CPU 快
+  retry_count: 2
+
+# 音频输出 - 推荐用 VB-Audio Virtual Cable 接入 OBS
+player:
+  sample_rate: 32000         # 匹配 GPT-SoVITS v2 输出采样率
+  channels: 1
+  device_index: null       # 设为 VB-Audio Cable 的设备索引
+  buffer_size: 10.0
+  volume: 1.0
+
+pipeline:
+  max_queue_size: 16       # 减小队列避免显存压力
+
+logging:
+  level: "INFO"
+  log_file: "logs/pipeline.log"

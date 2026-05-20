@@ -1,0 +1,76 @@
+# ============================================
+# M4 Max 36GB - 粤语→普通话模式
+# 说粤语 → 识别粤语 → 转换为标准普通话文字 → 克隆音色输出普通话语音
+# ============================================
+
+auto_detect_device: false
+
+# 运行模式: yue2zh = 粤语识别转普通话
+mode: "yue2zh"
+
+# 音频采集
+capture:
+  sample_rate: 16000
+  channels: 1
+  chunk_size: 1024
+  device_index: null
+  target_sample_rate: 16000
+
+# ASR - 识别粤语（Whisper 原生支持 language="yue"）
+asr:
+  model_size: "large"        # small/medium 对粤语识别效果更好
+  device: "cpu"              # faster-whisper MPS 支持有限
+  compute_type: "int8"
+  language: "yue"            # 🎯 关键：粤语识别
+  vad_filter: true
+  vad_parameters:
+    min_silence_duration_ms: 600
+    speech_pad_ms: 200
+    threshold: 0.5
+  beam_size: 5
+  chunk_duration_sec: 3.0
+
+# 翻译 - 粤语口语 → 普通话口语（用 HY-MT 做文本风格转换）
+translator:
+  model_name: "tencent/HY-MT1.5-1.8B"
+  device: "auto"             # M4 Max → MPS
+  src_lang: "yue"            # 🎯 粤语源语言
+  tgt_lang: "zh"             # 🎯 目标：普通话
+  max_new_tokens: 512
+  temperature: 0.5           # 低温度=更稳定的转换
+  top_k: 20
+  top_p: 0.6
+  repetition_penalty: 1.05
+
+# TTS - 输出普通话语音（克隆音色）
+tts:
+  api_url: "http://127.0.0.1:9880"
+  refer_wav_path: "reference_audio/my_voice.wav"
+  prompt_text: "大家好，欢迎来到我的直播间，今天我们来聊一聊有趣的话题。" 
+  prompt_language: "zh"      # 参考音频说普通话
+  output_language: "zh"      # 🎯 输出普通话语音
+  speed: 1.0
+  top_k: 15
+  top_p: 1.0
+  temperature: 0.8
+  seed: 42
+  repetition_penalty: 1.5
+  text_split_method: "cut5"
+  min_text_length: 3
+  timeout: 120
+  retry_count: 2
+
+# 音频输出
+player:
+  sample_rate: 32000
+  channels: 1
+  device_index: null
+  buffer_size: 10.0
+  volume: 1.0
+
+pipeline:
+  max_queue_size: 32
+
+logging:
+  level: "DEBUG"
+  log_file: "logs/pipeline.log"

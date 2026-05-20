@@ -1,0 +1,36 @@
+# ============================================
+# 中文→日语实时语音转换系统 - Python 依赖
+# ============================================
+
+# ASR 语音识别
+faster-whisper>=1.0.0
+
+# 翻译模型
+# HY-MT1.5-1.8B 需要 transformers>=4.56.0（hunyuan_v1_dense 架构从 4.56.0 起原生内置）
+# ⚠️ GPT-SoVITS 与新版 transformers 不兼容，需在独立 venv 中运行
+# 详见 scripts/setup_gptsovits_env.sh
+transformers>=4.56.0
+peft>=0.15.0             # HY-MT + LoRA
+sentencepiece>=0.1.99
+torch>=2.1.0
+accelerate>=0.20.0       # HY-MT device_map="auto" 需要
+
+# 音频采集和输出
+pyaudio>=0.2.14
+numpy>=1.24.0
+
+# TTS HTTP 请求
+requests>=2.31.0
+
+# 日文汉字智能分词（区分日语词汇 vs 中文人名）
+pykakasi>=2.3.0
+
+# 中文拼音转片假名（中文人名日语化）
+pypinyin>=0.51.0
+
+# 配置文件
+pyyaml>=6.0
+
+# 可选：GPU 加速
+# CUDA 版本需与你的 PyTorch 版本匹配
+# 安装时请参考: https://pytorch.org/get-started/locally/

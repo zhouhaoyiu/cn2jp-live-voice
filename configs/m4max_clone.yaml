@@ -1,0 +1,81 @@
+# ============================================
+# M4 Max 36GB - 纯音色克隆模式（不翻译）
+# 说中文 → 克隆音色输出中文
+# ============================================
+
+auto_detect_device: false
+
+# 运行模式: clone = 纯音色克隆（不翻译）
+mode: "clone"
+
+# 音频采集
+capture:
+  sample_rate: 16000
+  channels: 1
+  chunk_size: 1024
+  device_index: null
+  target_sample_rate: 16000
+
+# ASR - 识别中文
+asr:
+  model_size: "small"
+  device: "cpu"
+  compute_type: "int8"
+  language: "zh"
+  vad_filter: true
+  vad_parameters:
+    min_silence_duration_ms: 600
+    speech_pad_ms: 200
+    threshold: 0.5
+  beam_size: 5
+  chunk_duration_sec: 3.0
+
+# 翻译 - clone 模式下不使用，保留最小配置避免报错
+translator:
+  model_name: "tencent/HY-MT1.5-1.8B"
+  device: "auto"
+  src_lang: "zh"
+  tgt_lang: "zh"
+
+# TTS - 纯音色克隆：输出语言=中文，参考音频语言也是中文
+# 🔑 同语言克隆效果最好！音色还原度远高于跨语言
+#
+# ⚠️ prompt_text 规则（必读！否则输出音频开头会复述 prompt_text 的尾巴）：
+#   1. prompt_text 必须和参考音频内容【完全一致】，逐字对应
+#   2. 参考音频建议 3~10 秒，prompt_text 也只能是一句 3~10 秒的话
+#   3. 不要写比音频内容更多的文字！GPT-SoVITS 会把多出部分当目标文本
+#   ❌ 错误：录6秒说了"大家好"，但 prompt_text 写了"大家好欢迎来到直播间今天聊有趣的话题"
+#      → 输出会先说"今天聊有趣的话题"再说你的目标文本！
+#
+# 建议流程：python3 record_reference.py --duration 7 → 把录音时说的内容原封不动填到下面
+tts:
+  api_url: "http://127.0.0.1:9880"
+  refer_wav_path: "reference_audio/my_voice.wav"
+  prompt_text: "大家好，欢迎来到我的直播间，今天我们来聊一聊有趣的话题。"    # ⚠️ 必须改成你录音时说的内容！且与音频完全一致
+  prompt_language: "zh"
+  output_language: "zh"     # 🎯 关键：输出中文而非日语！
+  speed: 1.0
+  top_k: 15              # clone模式需要更大的采样空间
+  top_p: 1.0
+  temperature: 0.6       # 适当提高温度避免"抄"前缀
+  seed: 29
+  repetition_penalty: 1.5
+  text_split_method: "cut5"
+  min_text_length: 3
+  timeout: 120
+  retry_count: 2
+
+# 音频输出
+player:
+  sample_rate: 32000
+  channels: 1
+  device_index: null
+  buffer_size: 10.0
+  volume: 1.0
+
+pipeline:
+  max_queue_size: 32
+
+logging:
+  level: "DEBUG"
+  log_file: "logs/pipeline.log"

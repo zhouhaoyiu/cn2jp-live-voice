@@ -1,0 +1,82 @@
+# ============================================
+# M4 Max 36GB 开发环境配置
+# macOS + Apple Silicon, MPS 加速
+# ============================================
+
+auto_detect_device: false
+
+# 音频采集 - macOS 可能需要调整设备索引
+capture:
+  sample_rate: 16000
+  channels: 1
+  chunk_size: 1024
+  device_index: null   # macOS 默认麦克风，可设为具体索引
+  target_sample_rate: 16000
+
+# ASR - M4 Max 内存充足，可用稍大模型
+asr:
+  model_size: "small"      # M4 Max 36GB 可以用 small 模型
+  device: "cpu"            # faster-whisper 对 MPS 支持有限，用 CPU 也很快
+  compute_type: "int8"
+  language: "zh"
+  vad_filter: true
+  vad_parameters:
+    min_silence_duration_ms: 600
+    speech_pad_ms: 200
+    threshold: 0.5
+  beam_size: 5
+  chunk_duration_sec: 3.0
+
+# 翻译 - HY-MT1.5-1.8B (腾讯 WMT25 冠军系列)
+# 🏆 推荐模型！比 NLLB 翻译质量高、无重复问题、人名处理更好
+# 备选: facebook/nllb-200-distilled-600M (轻量但有重复问题)
+translator:
+  model_name: "tencent/HY-MT1.5-1.8B"
+  device: "auto"           # M4 Max 自动选择 MPS
+  src_lang: "zh"
+  tgt_lang: "ja"
+  # hf_endpoint: "https://hf-mirror.com"  # 国内无梯子时取消注释
+  # HY-MT 专用参数
+  max_new_tokens: 512      # 足够翻译长句
+  temperature: 0.7         # 推荐参数
+  top_k: 20                # 推荐参数
+  top_p: 0.6               # 推荐参数
+  repetition_penalty: 1.5 # HY-MT 不需要强惩罚
+  # NLLB 专用参数（仅 model_name 为 nllb 时生效）
+  # max_length: 128
+  # beam_size: 4
+  # no_repeat_ngram_size: 2
+
+# TTS - 连接 GPT-SoVITS API Server (本机 CPU 模式运行)
+# ⚡ 直播稳定性优化：固定 seed + 低温度 + 低 top_k = 每次声音一致
+tts:
+  api_url: "http://127.0.0.1:9880"
+  refer_wav_path: "reference_audio/my_voice.wav"
+  prompt_text: "大家好，欢迎来到我的直播间，今天我们来聊一聊有趣的话题。"    # ⚠️ 重要！请改成你录音时说的内容
+  prompt_language: "zh"
+  output_language: "ja"
+  speed: 1.0
+  top_k: 150                # 降低采样空间，音色更稳定
+  top_p: 1              # 核采样阈值，保守采样
+  temperature: 0.8        # 🔑 低温度 = 音色更一致，直播推荐 0.4-0.6
+  seed: 11                # 🔑 固定随机种子！同样文本=同样声音
+  repetition_penalty: 1.7  # 防止重复，比默认1.35稍强
+  text_split_method: "cut5" # 按标点切分，适合实时场景
+  min_text_length: 3      # 最短文本长度，过短文本跳过合成
+  timeout: 120             # CPU 模式很慢，120 秒超时
+  retry_count: 2
+
+# 音频输出 - GPT-SoVITS v2 输出 32kHz，播放器匹配此采样率
+player:
+  sample_rate: 32000         # 匹配 GPT-SoVITS v2 输出采样率，音质更好
+  channels: 1
+  device_index: null
+  buffer_size: 10.0
+  volume: 1.0
+
+pipeline:
+  max_queue_size: 32
+
+logging:
+  level: "DEBUG"           # 开发环境用 DEBUG
+  log_file: "logs/pipeline.log"

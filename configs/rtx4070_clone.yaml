@@ -1,0 +1,71 @@
+# ============================================
+# i5-13600KF + RTX 4070 - 纯音色克隆模式（不翻译）
+# 说中文 → 克隆音色输出中文
+# ============================================
+
+auto_detect_device: false
+
+# 运行模式: clone = 纯音色克隆（不翻译）
+mode: "clone"
+
+# 音频采集
+capture:
+  sample_rate: 16000
+  channels: 1
+  chunk_size: 1024
+  device_index: null
+  target_sample_rate: 16000
+
+# ASR
+asr:
+  model_size: "small"
+  device: "cuda"
+  compute_type: "float16"
+  language: "zh"
+  vad_filter: true
+  vad_parameters:
+    min_silence_duration_ms: 600
+    speech_pad_ms: 300
+    threshold: 0.5
+  beam_size: 5
+  chunk_duration_sec: 3.0
+
+# 翻译 - clone 模式下不使用
+translator:
+  model_name: "tencent/HY-MT1.5-1.8B"
+  device: "cuda"
+  src_lang: "zh"
+  tgt_lang: "zh"
+
+# TTS - 纯音色克隆
+tts:
+  api_url: "http://127.0.0.1:9880"
+  refer_wav_path: "reference_audio/my_voice.wav"
+  prompt_text: "大家好，欢迎来到我的直播间，今天我们来聊一聊有趣的话题"    # ⚠️ 改成你录音时说的内容
+  prompt_language: "zh"
+  output_language: "zh"
+  speed: 1.1
+  top_k: 15
+  top_p: 1
+  temperature: 0.8
+  seed: 42
+  repetition_penalty: 1.6
+  text_split_method: "cut5"
+  min_text_length: 3
+  timeout: 30
+  retry_count: 2
+
+# 音频输出
+player:
+  sample_rate: 32000
+  channels: 1
+  device_index: null
+  buffer_size: 10.0
+  volume: 1.0
+
+pipeline:
+  max_queue_size: 32
+
+logging:
+  level: "INFO"
+  log_file: "logs/pipeline.log"
