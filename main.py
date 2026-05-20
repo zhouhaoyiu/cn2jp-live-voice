@@ -5,12 +5,6 @@
 功能：说中文，实时输出日语语音（保留本人音色）
 流程：麦克风 → ASR(语音识别) → 翻译(中→日) → TTS(音色克隆) → 虚拟音频输出
 
-支持模式:
-  - translate: 中文→日语翻译+克隆音色 (默认)
-  - clone:     中文→中文纯音色克隆
-  - yue2zh:    粤语→普通话+克隆音色输出
-  - yue2zh_text: 粤语→普通话纯文本流式输出 (无需 GPT-SoVITS)
-
 使用方式:
     # 默认配置启动
     python main.py
@@ -18,10 +12,6 @@
     # 指定环境配置
     python main.py --env m4max
     python main.py --env rtx4050
-
-    # 粤语转普通话（纯文本流式输出，无需 GPT-SoVITS）
-    python main.py --env m4max_yue2zh --mode yue2zh_text
-    python main.py --mode yue2zh_text
 
     # 列出音频设备
     python main.py --list-devices
@@ -39,7 +29,6 @@ import argparse
 import sys
 import signal
 import time
-import datetime
 import numpy as np
 from pathlib import Path
 
@@ -52,7 +41,7 @@ from utils.helpers import load_config, setup_logging, print_system_info, get_con
 
 def main():
     parser = argparse.ArgumentParser(
-        description="实时语音转换系统（翻译/音色克隆/粤语转普通话）",
+        description="实时语音转换系统（翻译/音色克隆）",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 示例:
@@ -64,13 +53,6 @@ def main():
   python3 main.py --env m4max --mode clone
   python3 main.py --env rtx4050_clone
 
-  # 粤语转普通话（纯文本流式输出，无需 GPT-SoVITS）
-  python3 main.py --env m4max_yue2zh --mode yue2zh_text
-  python3 main.py --mode yue2zh_text
-
-  # 粤语转普通话（含 TTS 音色克隆输出）
-  python3 main.py --env m4max_yue2zh
-
   # 测试
   python3 main.py --list-devices
   python3 main.py --test-asr audio.wav
@@ -78,6 +60,7 @@ def main():
   python3 main.py --test-tts "你好"          # 翻译模式测试
   python3 main.py --test-tts "你好" --mode clone  # 纯克隆测试
   python3 main.py --fix-nltk             # 下载 GPT-SoVITS 所需 NLTK 数据
+  python3 main.py --download-models      # 预下载所有模型（之后可离线使用）
         """,
     )
     parser.add_argument(
@@ -100,6 +83,7 @@ def main():
     parser.add_argument("--test-translate", type=str, metavar="TEXT", help="测试翻译")
     parser.add_argument("--test-tts", type=str, metavar="TEXT", help="测试 TTS")
     parser.add_argument("--fix-nltk", action="store_true", help="下载 GPT-SoVITS 所需的 NLTK 数据")
+    parser.add_argument("--download-models", action="store_true", help="预下载所有模型到本地缓存（之后可离线使用）")
     parser.add_argument("--log-level", default="INFO", help="日志级别")
 
     args = parser.parse_args()
@@ -138,19 +122,14 @@ def main():
         # clone 模式自动修改 TTS 输出语言为中文
         if args.mode == "clone" and "tts" in config:
             config["tts"]["output_language"] = "zh"
-        # yue2zh / yue2zh_text 模式：粤语ASR + 粤语→普通话翻译
-        if args.mode in ("yue2zh", "yue2zh_text"):
-            if "asr" in config:
-                config["asr"]["language"] = "yue"
-            if "translator" in config:
-                config["translator"]["src_lang"] = "yue"
-                config["translator"]["tgt_lang"] = "zh"
-            if "tts" in config:
-                config["tts"]["output_language"] = "zh"
 
     # 处理测试命令
     if args.fix_nltk:
         _fix_nltk()
+        return
+
+    if args.download_models:
+        _download_models(config)
         return
 
     if args.test_asr:
@@ -214,6 +193,103 @@ def _fix_nltk():
         logger.error("  python -c \"import nltk; nltk.download('averaged_perceptron_tagger_eng')\"")
 
 
+def _download_models(config: dict):
+    """预下载所有模型到本地缓存，之后可离线使用"""
+    import os
+    import logging
+    logger = logging.getLogger("download_models")
+
+    logger.info("=" * 60)
+    logger.info("预下载模型到本地缓存（需要联网）")
+    logger.info("下载后可永久离线使用，无需再连 HuggingFace")
+    logger.info("=" * 60)
+
+    # 🌐 预先设置镜像（国内必备）
+    hf_endpoint = os.environ.get("HF_ENDPOINT", "")
+    if not hf_endpoint:
+        hf_endpoint = config.get("translator", {}).get("hf_endpoint", "")
+    if not hf_endpoint:
+        try:
+            import urllib.request
+            urllib.request.urlopen("https://huggingface.co", timeout=5)
+        except Exception:
+            hf_endpoint = "https://hf-mirror.com"
+            logger.info("🌐 检测到无法直连 HuggingFace，自动使用镜像: hf-mirror.com")
+    if hf_endpoint:
+        os.environ["HF_ENDPOINT"] = hf_endpoint
+        logger.info(f"HF_ENDPOINT: {hf_endpoint}")
+
+    # 1. 下载 ASR 模型 (faster-whisper)
+    asr_config = config.get("asr", {})
+    model_size = asr_config.get("model_size", "base")
+    logger.info(f"\n[1/2] 下载 ASR 模型 (faster-whisper/{model_size})...")
+    try:
+        from faster_whisper import WhisperModel
+        model = WhisperModel(model_size, local_files_only=False)
+        del model
+        logger.info(f"  ✅ ASR 模型 {model_size} 已缓存")
+    except Exception as e:
+        logger.error(f"  ❌ ASR 模型下载失败: {e}")
+
+    # 2. 下载翻译模型（使用 huggingface-cli 断点续传）
+    translator_config = config.get("translator", {})
+    model_name = translator_config.get("model_name", "tencent/HY-MT1.5-1.8B")
+    logger.info(f"\n[2/2] 下载翻译模型 ({model_name})...")
+    logger.info(f"  模型大小约 3.6GB，支持断点续传")
+
+    download_ok = False
+
+    # 方法1: huggingface-cli（支持断点续传，推荐）
+    try:
+        from huggingface_hub import snapshot_download
+        logger.info("  使用 huggingface_hub 下载（支持断点续传）...")
+        snapshot_download(
+            model_name,
+            resume_download=True,
+            max_workers=4,
+        )
+        download_ok = True
+        logger.info(f"  ✅ 翻译模型已缓存")
+    except ImportError:
+        logger.warning("  huggingface_hub 未安装，尝试备选方式...")
+    except Exception as e:
+        logger.warning(f"  huggingface_hub 下载失败: {e}")
+
+    # 方法2: transformers from_pretrained（无断点续传，但不需要额外依赖）
+    if not download_ok:
+        try:
+            logger.info("  使用 transformers 加载下载（无断点续传）...")
+            translator_config_copy = dict(translator_config)
+            translator_config_copy["local_files_only"] = False
+            from modules.translator import TranslatorModule
+            translator = TranslatorModule(translator_config_copy)
+            translator.load_model()
+            download_ok = True
+            logger.info(f"  ✅ 翻译模型已缓存")
+        except Exception as e:
+            logger.error(f"  ❌ 翻译模型下载失败: {e}")
+
+    if not download_ok:
+        logger.error("")
+        logger.error("=" * 60)
+        logger.error("⚠️ 翻译模型下载失败！请手动下载：")
+        logger.error("")
+        logger.error("方法1: 使用 huggingface-cli（推荐，支持断点续传）")
+        logger.error(f"  pip install -U huggingface_hub")
+        logger.error(f"  export HF_ENDPOINT=https://hf-mirror.com  # 国内用镜像")
+        logger.error(f"  huggingface-cli download {model_name}")
+        logger.error("")
+        logger.error("方法2: 使用镜像网站手动下载")
+        logger.error(f"  打开 https://hf-mirror.com/{model_name}")
+        logger.error("  下载所有文件到 ~/.cache/huggingface/hub/models--tencent--HY-MT1.5-1.8B/")
+        logger.error("=" * 60)
+
+    logger.info("\n" + "=" * 60)
+    logger.info("模型下载流程结束！之后启动将优先使用本地缓存")
+    logger.info("缓存位置: ~/.cache/huggingface/hub/")
+    logger.info("=" * 60)
+
+
 def _test_asr(config: dict, audio_file: str):
     """测试 ASR 模块"""
     import logging
@@ -238,11 +314,9 @@ def _test_translate(config: dict, text: str):
     translator = TranslatorModule(config.get("translator", {}))
     translator.load_model()
 
-    src_lang = config.get("translator", {}).get("src_lang", "zh")
-    tgt_lang = config.get("translator", {}).get("tgt_lang", "ja")
-    logger.info(f"原文 [{src_lang}]: {text}")
+    logger.info(f"原文: {text}")
     result = translator.translate(text)
-    logger.info(f"译文 [{tgt_lang}]: {result}")
+    logger.info(f"译文: {result}")
 
 
 def _test_tts(config: dict, text: str):
@@ -253,38 +327,21 @@ def _test_tts(config: dict, text: str):
     import sys
     logger = logging.getLogger("test_tts")
 
-    mode = config.get("mode", "translate")
-    is_clone = mode == "clone"
-    is_yue2zh = mode in ("yue2zh", "yue2zh_text")
+    is_clone = config.get("mode", "translate") == "clone"
 
     if is_clone:
         # 纯克隆模式：中文直接合成
-        logger.info(f"[克隆模式] 合成文本: {text}")
+        logger.info(f"📝 [克隆模式] 合成文本: {text}")
         tts_text = text
-    elif is_yue2zh:
-        # 粤语→普通话模式：文本转换后合成普通话
-        from modules.translator import TranslatorModule
-        translator = TranslatorModule(config.get("translator", {}))
-        translator.load_model()
-
-        logger.info(f"[粤语转普通话] 原文: {text}")
-        converted = translator.translate(text)
-        logger.info(f"[粤语转普通话] 普通话: {converted}")
-
-        if converted:
-            tts_text = converted
-        else:
-            logger.error("❌ 粤语转普通话失败，跳过 TTS 合成")
-            return
     else:
         # 翻译模式：先翻译再合成
         from modules.translator import TranslatorModule
         translator = TranslatorModule(config.get("translator", {}))
         translator.load_model()
 
-        logger.info(f"原文(中文): {text}")
+        logger.info(f"📝 原文(中文): {text}")
         translated = translator.translate(text)
-        logger.info(f"译文(日文): {translated}")
+        logger.info(f"🌐 译文(日文): {translated}")
 
         # ⚠️ 翻译失败时不应该把中文原文发给 ja 模式 TTS（会读不出声）
         if translated:
@@ -349,12 +406,6 @@ def _run_pipeline(config: dict, logger):
     from pipeline.orchestrator import StreamPipeline
 
     pipeline = StreamPipeline(config)
-
-    # 🔑 yue2zh_text 模式：设置流式文本输出回调
-    mode = config.get("mode", "translate")
-    if mode == "yue2zh_text":
-        pipeline.set_on_stream_text(_stream_text_callback)
-
     pipeline.start()
 
     # 信号处理 - 优雅退出
@@ -367,13 +418,7 @@ def _run_pipeline(config: dict, logger):
     signal.signal(signal.SIGTERM, signal_handler)
 
     # 主线程循环 - 定期打印状态
-    mode_labels = {
-        "clone": "克隆",
-        "yue2zh": "粤语转普通话",
-        "yue2zh_text": "粤语转普通话(文本)",
-        "translate": "翻译",
-    }
-    mode_label = mode_labels.get(mode, mode)
+    mode_label = "克隆" if config.get("mode") == "clone" else "翻译"
     try:
         while True:
             time.sleep(10)
@@ -386,38 +431,6 @@ def _run_pipeline(config: dict, logger):
         pass
 
     pipeline.stop()
-
-
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-#  流式文本输出回调（yue2zh_text 模式专用）
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-# 缓存上一条粤语原文，用于翻译完成后更新显示
-_last_cantonese_text = ""
-
-
-def _stream_text_callback(cantonese_text: str, mandarin_text: str):
-    """
-    流式文本输出回调 - 在终端实时显示粤语→普通话转换结果
-
-    Args:
-        cantonese_text: 粤语原文
-        mandarin_text: 普通话译文（空=正在翻译中，非空=翻译完成）
-    """
-    global _last_cantonese_text
-
-    now = datetime.datetime.now().strftime("%H:%M:%S")
-
-    if not mandarin_text:
-        # ASR 刚识别出粤语，翻译还未完成
-        _last_cantonese_text = cantonese_text
-        print(f"\n{'─' * 50}")
-        print(f"  🗣️ 粤语 [{now}]: {cantonese_text}")
-        print(f"  ⏳ 翻译中...")
-    else:
-        # 翻译完成，显示普通话结果
-        print(f"\n  ✅ 普通话: {mandarin_text}")
-        print(f"{'─' * 50}")
 
 
 if __name__ == "__main__":

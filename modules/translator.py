@@ -19,7 +19,6 @@ LANG_CODE_MAP = {
     "ja": "jpn_Jpan",    # 日语
     "en": "eng_Latn",    # 英语
     "ko": "kor_Hang",    # 韩语
-    "yue": "yue_Hant",   # 粤语（繁体字）
 }
 
 # HY-MT 目标语言名称（中文指令用中文语言名）
@@ -29,13 +28,6 @@ HYMT_TGT_LANG = {
     "ko": "韩语",
     "zh": "中文",
 }
-
-# HY-MT 粤语→普通话专用 prompt
-# 粤语口语和普通话差异大（词汇、语法、用字），用专用 prompt 效果更好
-HYMT_YUE2ZH_PROMPT = (
-    "将以下粤语口语转换为标准普通话口语，保持原意不变，"
-    "只需输出转换后的结果，不要额外解释：\n\n{text}"
-)
 
 # ━━━ 模型类型自动检测 ━━━
 def _detect_model_type(model_name: str) -> str:
@@ -385,28 +377,30 @@ class TranslatorModule:
 
         logger.info(f"加载 HY-MT 翻译模型: {self.model_name}")
 
-        # 🌐 自动设置 HuggingFace 镜像（国内无法直连 huggingface.co）
-        # 优先级: 环境变量 > 配置文件 > 自动检测
-        hf_endpoint = os.environ.get("HF_ENDPOINT", "")
-        if not hf_endpoint:
-            hf_endpoint = self.config.get("hf_endpoint", "")
-        if not hf_endpoint:
-            # 检测是否能连通 HuggingFace
-            try:
-                import urllib.request
-                urllib.request.urlopen("https://huggingface.co", timeout=5)
-            except Exception:
-                hf_endpoint = "https://hf-mirror.com"
-                logger.info("  🌐 检测到无法连接 HuggingFace，自动使用镜像: hf-mirror.com")
-
-        if hf_endpoint:
-            os.environ["HF_ENDPOINT"] = hf_endpoint
-            logger.info(f"  HF_ENDPOINT: {hf_endpoint}")
-
         # 🔇 压缩 HTTP / HF Hub 的 INFO 日志（模型加载时太啰嗦）
         _logging.getLogger("httpx").setLevel(_logging.WARNING)
         _logging.getLogger("httpcore").setLevel(_logging.WARNING)
         _logging.getLogger("huggingface_hub").setLevel(_logging.WARNING)
+
+        # 🔑 优先使用本地缓存，避免每次启动都联网检查
+        # 策略：先 local_files_only=True，失败后再联网（含镜像回退）
+        local_only = self.config.get("local_files_only", True)  # 默认优先本地
+
+        # 🌐 联网时自动设置 HuggingFace 镜像（国内无法直连 huggingface.co）
+        if not local_only:
+            hf_endpoint = os.environ.get("HF_ENDPOINT", "")
+            if not hf_endpoint:
+                hf_endpoint = self.config.get("hf_endpoint", "")
+            if not hf_endpoint:
+                try:
+                    import urllib.request
+                    urllib.request.urlopen("https://huggingface.co", timeout=5)
+                except Exception:
+                    hf_endpoint = "https://hf-mirror.com"
+                    logger.info("  🌐 检测到无法连接 HuggingFace，自动使用镜像: hf-mirror.com")
+            if hf_endpoint:
+                os.environ["HF_ENDPOINT"] = hf_endpoint
+                logger.info(f"  HF_ENDPOINT: {hf_endpoint}")
 
         # 确定设备
         device = self.device
@@ -426,7 +420,7 @@ class TranslatorModule:
         else:
             dtype = torch.bfloat16
 
-        logger.info(f"  设备: {device}, 精度: {dtype}")
+        logger.info(f"  设备: {device}, 精度: {dtype}, 本地优先: {local_only}")
 
         # HY-MT 使用 hunyuan_v1_dense 架构，需要 transformers>=4.56.0
         # 该架构从 4.56.0 起原生内置，无需 trust_remote_code
@@ -441,24 +435,65 @@ class TranslatorModule:
                 f"需在独立 venv 中运行，详见 scripts/setup_gptsovits_env.sh"
             )
 
-        self.tokenizer = AutoTokenizer.from_pretrained(self.model_name)
+        # 🔑 加载策略：先本地，后联网
+        # local_files_only=True 时不会联网，完全依赖缓存，无网也能用
+        loaded = False
+        load_error = None
 
-        # ⚠️ MPS 不支持 device_map="auto"（会报错）
-        # CUDA 可以用 device_map="auto" 自动分配显存
-        # CPU/MPS 需要手动 .to(device)
-        if device == "cuda":
-            self.model = AutoModelForCausalLM.from_pretrained(
-                self.model_name,
-                device_map="auto",
-                torch_dtype=dtype,
-            )
-        else:
-            # MPS / CPU: 先加载到内存，再 .to(device)
-            self.model = AutoModelForCausalLM.from_pretrained(
-                self.model_name,
-                torch_dtype=dtype,
-            )
-            self.model = self.model.to(device)
+        if local_only:
+            # 第一次尝试：纯本地加载
+            try:
+                logger.info("  从本地缓存加载（不联网）...")
+                self.tokenizer = AutoTokenizer.from_pretrained(
+                    self.model_name, local_files_only=True
+                )
+                if device == "cuda":
+                    self.model = AutoModelForCausalLM.from_pretrained(
+                        self.model_name, device_map="auto",
+                        torch_dtype=dtype, local_files_only=True,
+                    )
+                else:
+                    self.model = AutoModelForCausalLM.from_pretrained(
+                        self.model_name, torch_dtype=dtype, local_files_only=True,
+                    )
+                    self.model = self.model.to(device)
+                loaded = True
+            except Exception as e:
+                load_error = e
+                logger.warning(f"  本地缓存加载失败: {e}")
+                logger.info("  尝试联网下载...")
+
+        if not loaded:
+            # 联网加载（含镜像设置）
+            if not local_only:
+                # 还没设置过镜像，现在设置
+                hf_endpoint = os.environ.get("HF_ENDPOINT", "")
+                if not hf_endpoint:
+                    hf_endpoint = self.config.get("hf_endpoint", "")
+                if not hf_endpoint:
+                    try:
+                        import urllib.request
+                        urllib.request.urlopen("https://huggingface.co", timeout=5)
+                    except Exception:
+                        hf_endpoint = "https://hf-mirror.com"
+                        logger.info("  🌐 检测到无法连接 HuggingFace，自动使用镜像: hf-mirror.com")
+                if hf_endpoint:
+                    os.environ["HF_ENDPOINT"] = hf_endpoint
+                    logger.info(f"  HF_ENDPOINT: {hf_endpoint}")
+
+            self.tokenizer = AutoTokenizer.from_pretrained(self.model_name)
+            if device == "cuda":
+                self.model = AutoModelForCausalLM.from_pretrained(
+                    self.model_name, device_map="auto", torch_dtype=dtype,
+                )
+            else:
+                self.model = AutoModelForCausalLM.from_pretrained(
+                    self.model_name, torch_dtype=dtype,
+                )
+                self.model = self.model.to(device)
+
+            # 下载成功后提示：下次可离线使用
+            logger.info("  ✅ 模型已下载到本地缓存，下次启动可离线使用")
 
         self.model.eval()
         self._device = device
@@ -470,30 +505,52 @@ class TranslatorModule:
         import torch
         from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
 
-        # 🌐 自动设置 HuggingFace 镜像
-        hf_endpoint = os.environ.get("HF_ENDPOINT", "") or self.config.get("hf_endpoint", "")
-        if not hf_endpoint:
-            try:
-                import urllib.request
-                urllib.request.urlopen("https://huggingface.co", timeout=5)
-            except Exception:
-                hf_endpoint = "https://hf-mirror.com"
-                logger.info("  🌐 自动使用 HuggingFace 镜像: hf-mirror.com")
-        if hf_endpoint:
-            os.environ["HF_ENDPOINT"] = hf_endpoint
-
         device = self.device
         if device == "auto":
             device = "cuda" if torch.cuda.is_available() else "cpu"
 
         logger.info(f"加载 NLLB 翻译模型: {self.model_name}, 设备: {device}")
 
-        self.tokenizer = AutoTokenizer.from_pretrained(
-            self.model_name,
-            src_lang=LANG_CODE_MAP[self.src_lang],
-            use_fast=False,
-        )
-        self.model = AutoModelForSeq2SeqLM.from_pretrained(self.model_name)
+        local_only = self.config.get("local_files_only", True)
+        loaded = False
+
+        if local_only:
+            try:
+                logger.info("  从本地缓存加载（不联网）...")
+                self.tokenizer = AutoTokenizer.from_pretrained(
+                    self.model_name,
+                    src_lang=LANG_CODE_MAP[self.src_lang],
+                    use_fast=False,
+                    local_files_only=True,
+                )
+                self.model = AutoModelForSeq2SeqLM.from_pretrained(
+                    self.model_name, local_files_only=True,
+                )
+                loaded = True
+            except Exception as e:
+                logger.warning(f"  本地缓存加载失败: {e}")
+                logger.info("  尝试联网下载...")
+
+        if not loaded:
+            # 🌐 联网时自动设置镜像
+            hf_endpoint = os.environ.get("HF_ENDPOINT", "") or self.config.get("hf_endpoint", "")
+            if not hf_endpoint:
+                try:
+                    import urllib.request
+                    urllib.request.urlopen("https://huggingface.co", timeout=5)
+                except Exception:
+                    hf_endpoint = "https://hf-mirror.com"
+                    logger.info("  🌐 自动使用 HuggingFace 镜像: hf-mirror.com")
+            if hf_endpoint:
+                os.environ["HF_ENDPOINT"] = hf_endpoint
+
+            self.tokenizer = AutoTokenizer.from_pretrained(
+                self.model_name,
+                src_lang=LANG_CODE_MAP[self.src_lang],
+                use_fast=False,
+            )
+            self.model = AutoModelForSeq2SeqLM.from_pretrained(self.model_name)
+            logger.info("  ✅ 模型已下载到本地缓存，下次启动可离线使用")
 
         if device == "cuda":
             self.model = self.model.half()
@@ -528,8 +585,8 @@ class TranslatorModule:
             # 🔄 重复过滤（NLLB 严重需要，HY-MT 轻度需要）
             translated = self._filter_repetition(translated)
 
-            # 🧹 清理翻译结果：汉字→片假名（ja模式）、去中点等
-            translated = self._clean_for_tts(translated, tgt_lang=self.tgt_lang)
+            # 🧹 清理翻译结果：汉字→片假名、去中点等
+            translated = self._clean_for_tts(translated)
 
             logger.info(f"翻译完成: {text} -> {translated}")
             return translated
@@ -544,12 +601,8 @@ class TranslatorModule:
         """HY-MT1.5 翻译（decoder-only LLM + chat template）"""
         import torch
 
-        # 🗣️ 粤语→普通话用专用 prompt（口语转换而非跨语言翻译）
-        if self.src_lang == "yue" and self.tgt_lang == "zh":
-            prompt = HYMT_YUE2ZH_PROMPT.format(text=text)
-        else:
-            tgt_lang_name = HYMT_TGT_LANG.get(self.tgt_lang, self.tgt_lang)
-            prompt = f"将以下文本翻译为{tgt_lang_name}，注意只需要输出翻译后的结果，不要额外解释：\n\n{text}"
+        tgt_lang_name = HYMT_TGT_LANG.get(self.tgt_lang, self.tgt_lang)
+        prompt = f"将以下文本翻译为{tgt_lang_name}，注意只需要输出翻译后的结果，不要额外解释：\n\n{text}"
 
         messages = [{"role": "user", "content": prompt}]
 
@@ -699,11 +752,11 @@ class TranslatorModule:
         return text
 
     @staticmethod
-    def _clean_for_tts(text: str, tgt_lang: str = "ja") -> str:
+    def _clean_for_tts(text: str) -> str:
         """
         清理翻译结果中影响 TTS 合成质量的字符
 
-        1. 汉字→片假名（仅 ja 模式，GPT-SoVITS 日语模式读不了中文汉字）
+        1. 汉字→片假名（GPT-SoVITS ja 模式读不了中文汉字）
         2. 移除日文中点 "・"
         3. 移除多余空格和首尾标点
         """
@@ -712,9 +765,8 @@ class TranslatorModule:
 
         original = text
 
-        # 1. 汉字→片假名（仅日语 TTS 模式需要）
-        if tgt_lang == "ja":
-            text = _cjk_to_katakana(text)
+        # 1. 汉字→片假名
+        text = _cjk_to_katakana(text)
 
         # 2. 移除中点
         text = text.replace('・', '').replace('･', '')

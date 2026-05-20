@@ -1,13 +1,6 @@
 """
 ASR 模块 - 基于 faster-whisper 的实时语音识别
 支持流式识别，集成 VAD (语音活动检测)
-支持语言: zh(中文), yue(粤语), ja(日语), en(英语), auto(自动检测)
-
-粤语识别说明:
-  - language="yue" 使用 Whisper 的粤语模型分支
-  - 输出为粤语口语文字（如：我唔知、佢哋、咁等）
-  - 需配合翻译模块将粤语口语转为标准普通话文字
-  - 建议使用 medium 或以上模型获得更好粤语识别效果
 """
 import logging
 import queue
@@ -62,17 +55,6 @@ class ASRModule:
         self.beam_size = config.get("beam_size", 3)
         self.chunk_duration_sec = config.get("chunk_duration_sec", 3.0)
 
-        # 🗣️ 粤语模式优化：更短的分片以降低首字延迟
-        if self.language == "yue":
-            self.chunk_duration_sec = config.get("chunk_duration_sec", 2.0)  # 默认2秒，更快出结果
-            # 粤语 VAD 更积极：粤语语速快，静默间隔更短
-            if "vad_parameters" not in config:
-                self.vad_parameters = {
-                    "min_silence_duration_ms": 500,  # 比中文更短，更快断句
-                    "speech_pad_ms": 150,
-                    "threshold": 0.5,
-                }
-
         self.model = None
         self._audio_queue: queue.Queue = queue.Queue()
         self._running = False
@@ -94,12 +76,30 @@ class ASRModule:
         if device == "cpu":
             compute_type = "int8"
 
-        logger.info(f"加载 ASR 模型: {self.model_size}, 设备: {device}, 精度: {compute_type}")
-        self.model = WhisperModel(
-            self.model_size,
-            device=device,
-            compute_type=compute_type,
-        )
+        # 🔑 优先使用本地缓存，避免每次启动都联网
+        local_only = self.config.get("local_files_only", True)
+
+        logger.info(f"加载 ASR 模型: {self.model_size}, 设备: {device}, 精度: {compute_type}, 本地优先: {local_only}")
+        try:
+            self.model = WhisperModel(
+                self.model_size,
+                device=device,
+                compute_type=compute_type,
+                local_files_only=local_only,
+            )
+        except Exception as e:
+            if local_only:
+                logger.warning(f"本地缓存加载失败: {e}")
+                logger.info("尝试联网下载 ASR 模型...")
+                self.model = WhisperModel(
+                    self.model_size,
+                    device=device,
+                    compute_type=compute_type,
+                    local_files_only=False,
+                )
+                logger.info("✅ ASR 模型已下载到本地缓存，下次启动可离线使用")
+            else:
+                raise
         logger.info("ASR 模型加载完成")
 
     def start(self, on_text: Callable[[str, float], None]):
