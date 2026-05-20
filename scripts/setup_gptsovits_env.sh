@@ -66,14 +66,20 @@ echo ""
 echo "[3/5] 安装 PyTorch + GPT-SoVITS 依赖..."
 if [[ "$(uname)" == "Darwin" ]]; then
     # macOS: MPS 加速
-    pip install --quiet torch torchvision torchaudio
+    pip install --quiet torch==2.11.0 torchvision==0.26.0 torchaudio==2.11.0
 else
     # Linux: CUDA 加速
-    pip install --quiet torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
+    pip install --quiet torch==2.11.0 torchvision==0.26.0 torchaudio==2.11.0 --index-url https://download.pytorch.org/whl/cu121
 fi
 
 # 安装 GPT-SoVITS 依赖（限制 transformers 版本）
-pip install --quiet 'transformers==4.45.0' 'peft>=0.12.0,<0.14.0'
+pip install --quiet \
+    transformers==4.45.0 \
+    tokenizers==0.20.3 \
+    peft==0.12.0 \
+    accelerate==1.13.0 \
+    sentencepiece==0.2.1 \
+    huggingface-hub==0.36.2
 
 REQ_FILE="$GPTSOVITS_DIR/requirements.txt"
 if [ -f "$REQ_FILE" ]; then
@@ -83,7 +89,14 @@ else
 fi
 
 # 关键: 安装 GPT-SoVITS 日语/英文处理依赖
-pip install --quiet pyopenjtalk nltk pypinyin
+pip install --quiet \
+    numpy==1.26.4 \
+    scipy==1.17.1 \
+    librosa==0.10.2 \
+    soundfile==0.13.1 \
+    pyopenjtalk==0.4.1 \
+    nltk==3.9.4 \
+    pypinyin==0.55.0
 
 # 下载预训练模型
 echo ""

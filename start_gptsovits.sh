@@ -4,9 +4,9 @@ echo "参考音频等参数通过 API 请求传递，无需命令行指定"
 
 # 预下载 NLTK 数据（处理中英混合文本必需，如 "大家好我是saki"）
 cd "$(dirname "$0")/GPT-SoVITS"
-PYTHON="${VIRTUAL_ENV}/bin/python"
-if [ ! -f "$PYTHON" ]; then
-    PYTHON="python3"
+PYTHON="python3"
+if [ -n "$CONDA_PREFIX" ] && [ -x "$CONDA_PREFIX/bin/python" ]; then
+    PYTHON="$CONDA_PREFIX/bin/python"
 fi
 
 echo "检查 NLTK 数据..."

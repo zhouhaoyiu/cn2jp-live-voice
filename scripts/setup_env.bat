@@ -8,11 +8,12 @@ echo ============================================
 echo 中文-日语实时语音转换系统 - 环境安装
 echo ============================================
 
-REM 检查 Python
-python --version >nul 2>&1
+set ENV_NAME=cn2jp
+
+REM 检查 conda
+conda --version >nul 2>&1
 if errorlevel 1 (
-    echo [错误] 未找到 Python，请安装 Python 3.10+
-    echo 下载地址: https://www.python.org/downloads/
+    echo [错误] 未找到 conda，请先安装 Miniforge/Anaconda
     pause
     exit /b 1
 )
@@ -24,18 +25,24 @@ if errorlevel 1 (
     echo 如有 RTX 4050，请安装 NVIDIA 驱动
 )
 
-REM 创建虚拟环境
-echo [1/5] 创建 Python 虚拟环境...
-python -m venv venv
-call venv\Scripts\activate.bat
+REM 创建/激活 conda 环境
+echo [1/5] 创建/激活 conda 环境: %ENV_NAME% ...
+set ENV_EXISTS=
+for /f "tokens=1" %%i in ('conda info --envs ^| findstr /R /C:"^%ENV_NAME% "') do set ENV_EXISTS=1
+if not defined ENV_EXISTS (
+    conda create -n %ENV_NAME% python=3.11 -y
+)
+call conda activate %ENV_NAME%
+python --version
 
 REM 安装 PyTorch (CUDA 12.1)
 echo [2/5] 安装 PyTorch (CUDA 12.1)...
-pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
+pip install torch==2.11.0 torchvision==0.26.0 torchaudio==2.11.0 --index-url https://download.pytorch.org/whl/cu121
 
 REM 安装项目依赖
 echo [3/5] 安装项目依赖...
 pip install -r requirements.txt
+pip install faster-whisper==1.2.1 ctranslate2==4.7.1 transformers==5.8.0 tokenizers==0.22.2 peft==0.19.1 accelerate==1.13.0 sentencepiece==0.2.1 huggingface-hub==1.14.0 numpy==2.4.4 pyaudio==0.2.14 requests==2.34.0 pykakasi==2.3.0 pypinyin==0.55.0 pyyaml==6.0.3
 
 REM 下载模型
 echo [4/5] 下载模型（可能需要较长时间）...
