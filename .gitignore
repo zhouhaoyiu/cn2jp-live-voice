@@ -2,3 +2,7 @@
 .DS_Store
 jp.md
 test_tts_output.wav
+__pycache__/
+*.py[cod]
+.pytest_cache/
+*_cache.pickle
