@@ -10,7 +10,7 @@ capture:
   sample_rate: 16000
   channels: 1
   chunk_size: 1024
-  device_index: null   # macOS 默认麦克风，可设为具体索引
+  device_index: 2      # MacBook Pro 麦克风；用 null 时可能卡到虚拟输入
   target_sample_rate: 16000
 
 # ASR - M4 Max 内存充足，可用稍大模型

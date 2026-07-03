@@ -73,6 +73,9 @@ else
 fi
 
 # 安装 GPT-SoVITS 依赖（限制 transformers 版本）
+# torchcodec 需要真实 FFmpeg 动态库；PyPI 的 ffmpeg/ffmpeg-python 不够。
+conda install -c conda-forge "ffmpeg>=6,<7" -y
+
 pip install --quiet \
     transformers==4.45.0 \
     tokenizers==0.20.3 \
@@ -83,7 +86,7 @@ pip install --quiet \
 
 REQ_FILE="$GPTSOVITS_DIR/requirements.txt"
 if [ -f "$REQ_FILE" ]; then
-    pip install --quiet -r "$REQ_FILE" || true
+    pip install --quiet -r "$REQ_FILE"
 else
     pip install --quiet scipy numpy librosa soundfile
 fi

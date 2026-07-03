@@ -13,7 +13,7 @@ capture:
   sample_rate: 16000
   channels: 1
   chunk_size: 1024
-  device_index: null
+  device_index: 2      # MacBook Pro 麦克风；用 null 时可能卡到虚拟输入
   target_sample_rate: 16000
 
 # ASR - 识别粤语（Whisper 原生支持 language="yue"）

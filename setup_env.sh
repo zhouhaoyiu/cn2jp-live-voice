@@ -17,6 +17,7 @@ if ! command -v conda &> /dev/null; then
 fi
 
 ENV_NAME="cn2jp"
+WHISPER_SIZE="${WHISPER_SIZE:-small}"
 eval "$(conda shell.bash hook)"
 
 # 创建/激活 conda 环境
@@ -54,7 +55,8 @@ pip install \
 
 # 下载模型
 echo "[4/5] 下载模型（可能需要较长时间）..."
-python download_models.py --whisper-size small
+echo "  Whisper 模型: $WHISPER_SIZE"
+python download_models.py --whisper-size "$WHISPER_SIZE"
 
 # 搭建 GPT-SoVITS（独立 conda 环境，因 transformers 版本冲突）
 echo "[5/5] 搭建 GPT-SoVITS 独立环境..."
@@ -68,4 +70,5 @@ echo "使用步骤:"
 echo "  1. 录制参考音频: reference_audio/my_voice.wav"
 echo "  2. 启动 GPT-SoVITS: bash scripts/start_gptsovits.sh"
 echo "  3. 启动管道: python main.py --env m4max"
+echo "  粤语模式首次安装可用: WHISPER_SIZE=large bash scripts/setup_env.sh"
 echo "============================================"

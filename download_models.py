@@ -3,7 +3,7 @@
 模型下载脚本 - 自动下载所需模型到本地缓存
 
 下载的模型:
-1. faster-whisper (base/small) - 语音识别
+1. faster-whisper (base/small/large) - 语音识别；m4max_yue2zh 使用 large
 2. NLLB-200-Distilled-600M - 中日翻译
 3. GPT-SoVITS 需要单独克隆（见 setup_gptsovits.py）
 """
@@ -44,7 +44,7 @@ def download_nllb_model(model_name: str = "facebook/nllb-200-distilled-600M"):
 def main():
     import argparse
     parser = argparse.ArgumentParser(description="下载所需模型")
-    parser.add_argument("--whisper-size", default="base", help="Whisper 模型大小")
+    parser.add_argument("--whisper-size", default="base", help="Whisper 模型大小，例如 base/small/large")
     parser.add_argument("--skip-whisper", action="store_true", help="跳过 Whisper 下载")
     parser.add_argument("--skip-nllb", action="store_true", help="跳过 NLLB 下载")
     args = parser.parse_args()
@@ -53,22 +53,30 @@ def main():
     logger.info("开始下载模型文件")
     logger.info("=" * 50)
 
+    failed = False
+
     if not args.skip_whisper:
         try:
             download_whisper_model(args.whisper_size)
         except Exception as e:
             logger.error(f"Whisper 模型下载失败: {e}")
+            failed = True
 
     if not args.skip_nllb:
         try:
             download_nllb_model()
         except Exception as e:
             logger.error(f"NLLB 模型下载失败: {e}")
+            failed = True
+
+    if failed:
+        logger.error("模型下载失败，请查看上方错误")
+        sys.exit(1)
 
     logger.info("=" * 50)
     logger.info("模型下载完成！")
     logger.info("注意: GPT-SoVITS 需要单独设置，请运行:")
-    logger.info("  python setup_gptsovits.py")
+    logger.info("  bash scripts/setup_gptsovits_env.sh")
     logger.info("=" * 50)
 
 

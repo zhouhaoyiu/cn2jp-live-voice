@@ -99,9 +99,14 @@ class AudioPlayer:
     def stop(self):
         """停止音频输出"""
         self._running = False
+        with self._buffer_lock:
+            self._play_buffer = np.array([], dtype=np.float32)
 
         if self._stream is not None:
-            self._stream.stop_stream()
+            try:
+                self._stream.abort_stream()
+            except Exception:
+                pass
             self._stream.close()
             self._stream = None
 

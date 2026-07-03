@@ -55,14 +55,19 @@ bash scripts/setup_env.sh
 scripts\setup_env.bat
 ```
 
-> 脚本会自动安装依赖、下载模型并搭建 GPT-SoVITS。
+> 脚本会自动安装依赖、下载默认 ASR/翻译模型并搭建 GPT-SoVITS。
+> 默认下载 `faster-whisper-small`。粤语模式首次安装可直接下载 large：
+> ```bash
+> WHISPER_SIZE=large bash scripts/setup_env.sh
+> ```
 > 如需手动执行，可参考：
 > ```bash
 > conda create -n cn2jp python=3.11 -y
 > conda activate cn2jp
 > pip install torch torchvision torchaudio
 > pip install -r requirements.txt
-> python download_models.py
+> python download_models.py --whisper-size small
+> python download_models.py --whisper-size large --skip-nllb  # 粤语模式需要
 > ```
 > `download_models.py` 默认下载 faster-whisper + NLLB；HY-MT 会在首次使用时自动从 Hugging Face 拉取。
 
@@ -73,7 +78,7 @@ scripts\setup_env.bat
 > bash scripts/setup_gptsovits_env.sh
 > conda activate gptsovits
 > ```
-> Windows 可手动创建 `gptsovits` conda 环境并固定 `transformers==4.45.0`。
+> Windows 安装脚本会通过 `setup_gptsovits.py` 创建独立 `gptsovits` conda 环境，并固定 `transformers==4.45.0`。
 
 ### 环境版本（安装脚本固定）
 
@@ -120,6 +125,7 @@ scripts\setup_env.bat
 | scipy | 1.17.1 |
 | librosa | 0.10.2 |
 | soundfile | 0.13.1 |
+| ffmpeg | 6.x |
 | pyopenjtalk | 0.4.1 |
 | nltk | 3.9.4 |
 | pypinyin | 0.55.0 |
@@ -147,7 +153,7 @@ python record_reference.py --duration 10
 bash scripts/start_gptsovits.sh
 ```
 
-**macOS/Linux（已激活 gptsovits 环境）:**
+**macOS/Linux（兼容旧入口）:**
 ```bash
 ./start_gptsovits.sh
 ```
@@ -200,16 +206,16 @@ python main.py --list-devices
 python main.py --test-asr test_audio.wav
 
 # 测试翻译
-python main.py --test-translate "你好，欢迎来到我的直播间"
+python main.py --env m4max --test-translate "你好，欢迎来到我的直播间"
 
 # 测试 TTS
-python main.py --test-tts "こんにちは、私の配信へようこそ"
+python main.py --env m4max --test-tts "こんにちは、私の配信へようこそ"
 
 # 克隆模式测试
-python main.py --test-tts "你好，欢迎来到我的直播间" --mode clone
+python main.py --env m4max_clone --test-tts "你好，欢迎来到我的直播间"
 
 # 粤语转普通话测试
-python main.py --test-tts "我哋今晚开播" --mode yue2zh
+python main.py --env m4max_yue2zh --test-tts "我哋今晚开播"
 
 # 修复 GPT-SoVITS 所需 NLTK 数据（处理中英混合文本）
 python main.py --fix-nltk
@@ -228,6 +234,7 @@ python main.py --fix-nltk
 2. 在 `configs/m4max.yaml` 中设置 `player.device_index`
 3. OBS 音频源选择 BlackHole
 4. 设备索引可通过 `python main.py --list-devices` 查看
+5. 本机配置已固定 `capture.device_index: 2` 为 MacBook Pro 麦克风；换机器后用设备列表确认。
 
 ## 配置说明
 
@@ -239,8 +246,10 @@ python main.py --fix-nltk
 | `configs/m4max_yue2zh.yaml` | M4 Max 粤语→普通话 |
 | `configs/rtx4050.yaml` | RTX 4050 6GB 直播环境（翻译模式） |
 | `configs/rtx4050_clone.yaml` | RTX 4050 纯音色克隆 |
+| `configs/rtx4050_yue2zh.yaml` | RTX 4050 粤语→普通话 |
 | `configs/rtx4070.yaml` | RTX 4070 12GB 直播环境（翻译模式） |
 | `configs/rtx4070_clone.yaml` | RTX 4070 纯音色克隆 |
+| `configs/rtx4070_yue2zh.yaml` | RTX 4070 粤语→普通话 |
 
 ## 项目结构
 
@@ -254,8 +263,10 @@ cn2jp-live-voice/
 │   ├── m4max_yue2zh.yaml
 │   ├── rtx4050.yaml
 │   ├── rtx4050_clone.yaml
+│   ├── rtx4050_yue2zh.yaml
 │   ├── rtx4070.yaml
-│   └── rtx4070_clone.yaml
+│   ├── rtx4070_clone.yaml
+│   └── rtx4070_yue2zh.yaml
 ├── modules/                # 核心模块
 │   ├── asr.py             # ASR 语音识别
 │   ├── translator.py      # 中日翻译
@@ -307,7 +318,12 @@ cn2jp-live-voice/
 **GPT-SoVITS 报 transformers 版本冲突**
 ```bash
 bash scripts/setup_gptsovits_env.sh
-conda activate gptsovits
+bash scripts/start_gptsovits.sh
+```
+
+**GPT-SoVITS 报 torchcodec / libavutil / FFmpeg 错误**
+```bash
+conda install -n gptsovits -c conda-forge "ffmpeg>=6,<7" -y
 bash scripts/start_gptsovits.sh
 ```
 
@@ -322,6 +338,15 @@ python main.py --fix-nltk
 **没有声音 / OBS 没有输入**
 - 用 `python main.py --list-devices` 找到虚拟音频设备索引。
 - 确认 `player.sample_rate` 与 GPT-SoVITS 输出一致（默认 32000Hz）。
+
+**实时管道卡在音频采集**
+- 用 `python main.py --list-devices` 找到真实麦克风索引。
+- 在对应配置里设置 `capture.device_index`，不要依赖 `null` 默认设备。
+
+**粤语模式缺 ASR large 模型**
+```bash
+python download_models.py --whisper-size large --skip-nllb
+```
 
 **HY-MT 显存不足**
 - 4050 6GB 可能 OOM，改用 `facebook/nllb-200-distilled-600M`。
