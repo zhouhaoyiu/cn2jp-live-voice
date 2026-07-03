@@ -597,11 +597,7 @@ class TranslatorModule:
             else:
                 translated = self._translate_nllb(text)
 
-            # 🔄 重复过滤（NLLB 严重需要，HY-MT 轻度需要）
-            translated = self._filter_repetition(translated)
-
-            # 🧹 清理翻译结果：汉字→片假名、去中点等
-            translated = self._clean_for_tts(translated)
+            translated = self._postprocess_translation(translated)
 
             logger.info(f"翻译完成: {text} -> {translated}")
             return translated
@@ -612,14 +608,38 @@ class TranslatorModule:
             logger.error(traceback.format_exc())
             return ""
 
+    def _postprocess_translation(self, text: str) -> str:
+        text = self._filter_repetition(text)
+        text = re.sub(r'\s+', ' ', text).strip()
+        if self.tgt_lang != "ja":
+            return text
+        text = self._naturalize_ja_for_speech(text)
+        return self._clean_for_tts(text)
+
+    def _build_hymt_prompt(self, text: str) -> str:
+        if self.src_lang == "yue" and self.tgt_lang == "zh":
+            return (
+                "将以下粤语口语转换成自然普通话口语。只输出转换后的中文，不要解释：\n\n"
+                f"{text}"
+            )
+
+        if self.tgt_lang == "ja":
+            return (
+                "你是直播同传。把下面的中文口语翻成自然的日语口语，适合直接朗读。\n"
+                "只输出日文译文，不要解释，不要加括号。\n"
+                "直播常用译法：欢迎来到我的直播间=私の配信へようこそ；直播间=配信；"
+                "今天测试日语语音=今日は日本語の音声をテストします。\n\n"
+                f"{text}"
+            )
+
+        tgt_lang_name = HYMT_TGT_LANG.get(self.tgt_lang, self.tgt_lang)
+        return f"将以下文本翻译为{tgt_lang_name}，只输出翻译结果，不要解释：\n\n{text}"
+
     def _translate_hymt(self, text: str) -> str:
         """HY-MT1.5 翻译（decoder-only LLM + chat template）"""
         import torch
 
-        tgt_lang_name = HYMT_TGT_LANG.get(self.tgt_lang, self.tgt_lang)
-        prompt = f"将以下文本翻译为{tgt_lang_name}，注意只需要输出翻译后的结果，不要额外解释：\n\n{text}"
-
-        messages = [{"role": "user", "content": prompt}]
+        messages = [{"role": "user", "content": self._build_hymt_prompt(text)}]
 
         # 🔑 先用 apply_chat_template 生成文本 prompt，再手动 tokenize
         # 直接用 tokenize=True + return_tensors="pt" 在某些 transformers 版本
@@ -767,6 +787,27 @@ class TranslatorModule:
         return text
 
     @staticmethod
+    def _naturalize_ja_for_speech(text: str) -> str:
+        """
+        修少量高频直译，目标是直播 TTS 顺口。
+        """
+        if not text:
+            return text
+
+        original = text
+        text = text.replace("ライブ配信室", "配信")
+        text = text.replace("配信室", "配信")
+        text = re.sub(r"へよう来ましたね?", "へようこそ", text)
+        text = text.replace("よう来ましたね", "ようこそ")
+        text = text.replace("よう来ました", "ようこそ")
+        text = re.sub(r"([^、。！？]+)での音声テストを行います", r"\1の音声をテストします", text)
+        text = text.replace("音声テストを行います", "音声をテストします")
+
+        if text != original:
+            logger.info(f"🗣️ 日语口语清理: '{original}' → '{text}'")
+        return text
+
+    @staticmethod
     def _clean_for_tts(text: str) -> str:
         """
         清理翻译结果中影响 TTS 合成质量的字符
@@ -842,16 +883,26 @@ class TranslatorModule:
 
 
 def _self_check():
-    cases = {
+    kana_cases = {
         "今日は日本語の配信です": "キョウはニホンゴのハイシンです",
         "日本語": "ニホンゴ",
         "私は李晶です": "ワタシはリージンです",
         "こんにちは世界": "こんにちはセカイ",
     }
-    for src, expected in cases.items():
+    for src, expected in kana_cases.items():
         got = _cjk_to_katakana(src)
         assert got == expected, (src, got, expected)
         assert not any(_is_cjk_char(ch) for ch in got), (src, got)
+
+    ja = TranslatorModule({"tgt_lang": "ja"})
+    got = ja._postprocess_translation(
+        "こんにちは、私のライブ配信室へよう来ましたね。今日は日本語での音声テストを行います。"
+    )
+    assert got == "こんにちは、ワタシのハイシンへようこそ。キョウはニホンゴのオンセイをテストします", got
+
+    zh = TranslatorModule({"tgt_lang": "zh"})
+    assert zh._postprocess_translation("我们今晚开始直播吧") == "我们今晚开始直播吧"
+
     print("translator_self_check_ok")
 
 
