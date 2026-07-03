@@ -1,4 +1,14 @@
-/GPT_SoVITS
+__pycache__/
+*.py[cod]
+
 .DS_Store
+venv/
+logs/
+
+/GPT-SoVITS/
+/GPT_SoVITS/
+
 jp.md
 test_tts_output.wav
+reference_audio/*
+!reference_audio/.gitkeep

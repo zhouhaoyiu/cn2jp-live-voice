@@ -16,10 +16,19 @@ logger = logging.getLogger(__name__)
 # NLLB 专用语言代码
 LANG_CODE_MAP = {
     "zh": "zho_Hans",    # 简体中文
+    "yue": "yue_Hant",   # 粤语
     "ja": "jpn_Jpan",    # 日语
     "en": "eng_Latn",    # 英语
     "ko": "kor_Hang",    # 韩语
 }
+
+
+def _nllb_lang_code(lang: str) -> str:
+    try:
+        return LANG_CODE_MAP[lang]
+    except KeyError as exc:
+        supported = ", ".join(sorted(LANG_CODE_MAP))
+        raise ValueError(f"NLLB 不支持语言代码 '{lang}'，当前支持: {supported}") from exc
 
 # HY-MT 目标语言名称（中文指令用中文语言名）
 HYMT_TGT_LANG = {
@@ -519,7 +528,7 @@ class TranslatorModule:
                 logger.info("  从本地缓存加载（不联网）...")
                 self.tokenizer = AutoTokenizer.from_pretrained(
                     self.model_name,
-                    src_lang=LANG_CODE_MAP[self.src_lang],
+                    src_lang=_nllb_lang_code(self.src_lang),
                     use_fast=False,
                     local_files_only=True,
                 )
@@ -546,7 +555,7 @@ class TranslatorModule:
 
             self.tokenizer = AutoTokenizer.from_pretrained(
                 self.model_name,
-                src_lang=LANG_CODE_MAP[self.src_lang],
+                src_lang=_nllb_lang_code(self.src_lang),
                 use_fast=False,
             )
             self.model = AutoModelForSeq2SeqLM.from_pretrained(self.model_name)
@@ -655,7 +664,7 @@ class TranslatorModule:
 
         inputs = self.tokenizer(text, return_tensors="pt", padding=True).to(self._device)
 
-        tgt_lang_code = LANG_CODE_MAP[self.tgt_lang]
+        tgt_lang_code = _nllb_lang_code(self.tgt_lang)
         if hasattr(self.tokenizer, 'lang_code_to_id'):
             forced_bos_token_id = self.tokenizer.lang_code_to_id[tgt_lang_code]
         else:

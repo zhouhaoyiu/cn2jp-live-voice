@@ -75,7 +75,7 @@ scripts\setup_env.bat
 > ```
 > Windows 可手动创建 `gptsovits` conda 环境并固定 `transformers==4.45.0`。
 
-### 环境版本（当前系统）
+### 环境版本（安装脚本固定）
 
 **cn2jp (主流程环境)**
 
