@@ -12,3 +12,7 @@ jp.md
 test_tts_output.wav
 reference_audio/*
 !reference_audio/.gitkeep
+__pycache__/
+*.py[cod]
+.pytest_cache/
+*_cache.pickle
